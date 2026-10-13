@@ -46,7 +46,7 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
       - name: 品質報告
         if: steps.dl.outputs.complete == 'true'
-        run: head -150 data_quality_report.md
+        run: head -230 data_quality_report.md
       - uses: actions/upload-artifact@v4
         if: steps.dl.outputs.complete == 'true'
         with:

@@ -148,3 +148,16 @@ def test_quality_excludes_zero_prices_and_adjusted_moves_shrink():
     assert r["n_raw_big"] == 1      # 只剩 100→70 這一次（零價格列已排除）
     assert r["n_adj_big"] == 0      # 還原後除權息日的跳動消失
     assert r["n_split_like"] == 0
+    assert r["n_ex_events"] == 1 and abs(r["ex_adj_median"]) < 1e-9 and r["ex_raw_median"] < -0.29  # 原始 -30%，還原後 0%
+
+
+def test_quality_flags_split_like_jump_without_dividend_data():
+    """0050 型態：單日 -75%（1 拆 4）而除權息資料沒涵蓋 → 必須被列為「非停牌復牌的巨大跳動」。"""
+    from picker.data.quality import check_bars
+    d = pd.bdate_range("2025-06-12", periods=6)
+    close = [190.0, 190.0, 190.0, 47.5, 47.6, 47.7]
+    bars = pd.DataFrame({"date": d, "symbol": "0050", "open": close, "high": close, "low": close, "close": close,
+                         "volume": 1, "turnover": 1.0})
+    div = pd.DataFrame({"symbol": ["0050"], "date": [pd.Timestamp("2018-01-01")], "before_price": [1.0], "after_price": [1.0]})
+    r = check_bars(bars, d, div)
+    assert r["n_split_consecutive"] == 1 and r["split_like"].iloc[0]["symbol"] == "0050"

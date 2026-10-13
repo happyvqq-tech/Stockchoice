@@ -37,13 +37,27 @@ def check_bars(bars, calendar, dividends=None):
             parts.append(add_adj_close(g, d))
         b = pd.concat(parts, ignore_index=True).sort_values(["symbol", "date"])
         b["adj_ret"] = b.groupby("symbol")["adj_close"].pct_change()
+        b["gap_days"] = b.groupby("symbol")["date"].diff().dt.days  # 與前一個有效價格相隔的日曆天數
         adj_big = b[b["adj_ret"].abs() > LIMIT]
         res["n_adj_big"] = len(adj_big)
-        res["n_split_like"] = int((b["adj_ret"].abs() > SPLIT_LIKE).sum())
-        res["split_like"] = _top(b[b["adj_ret"].abs() > SPLIT_LIKE][["symbol", "date", "close", "adj_ret"]]
-                                 .sort_values("adj_ret", key=abs, ascending=False), 30)
-        res["split_like_by_symbol"] = (b[b["adj_ret"].abs() > SPLIT_LIKE].groupby("symbol").size()
+        big = b[b["adj_ret"].abs() > SPLIT_LIKE]
+        res["n_split_like"] = len(big)
+        consecutive = big[big["gap_days"] <= 5]  # 前一個有效價格在 5 天內：不是長期停牌後復牌，較可能是分割／減資／資料錯誤
+        res["n_split_consecutive"] = len(consecutive)
+        res["split_like"] = _top(consecutive[["symbol", "date", "close", "adj_ret", "gap_days"]]
+                                 .sort_values("adj_ret", key=abs, ascending=False), 40)
+        res["split_like_by_symbol"] = (consecutive.groupby("symbol").size()
                                        .sort_values(ascending=False).rename("次數").reset_index().head(15))
+        # 2) 直接驗證除權息還原：除權息日當天，還原後報酬應明顯比原始報酬更接近 0
+        ex = dividends[["symbol", "date"]].rename(columns={"date": "ex_date"})
+        ev = b.merge(ex, left_on=["symbol", "date"], right_on=["symbol", "ex_date"])
+        ev = ev[(ev["gap_days"] <= 5) & ev["ret"].notna() & ev["adj_ret"].notna()]
+        res["n_ex_events"] = len(ev)
+        res["ex_raw_median"] = float(ev["ret"].median()) if len(ev) else None
+        res["ex_adj_median"] = float(ev["adj_ret"].median()) if len(ev) else None
+        res["n_ex_adj_bad"] = int((ev["adj_ret"].abs() > 0.05).sum())
+        res["ex_adj_bad"] = _top(ev[ev["adj_ret"].abs() > 0.05][["symbol", "date", "ret", "adj_ret"]]
+                                 .sort_values("adj_ret", key=abs, ascending=False), 20)
         res["bench"] = b[(b["symbol"] == "0050") & (b["adj_ret"].abs() > 0.08)][["date", "close", "adj_ret"]].head(10)
     else:
         res["n_adj_big"] = None
@@ -76,13 +90,15 @@ def render_report(res, n_symbols, n_rows, extra=""):
     if adj is not None:
         lines += [
             f"- 同樣條件，**改用還原價**：{adj} 筆（還原有效的話應大幅下降，剩下的多為新上市前幾天、處置/恢復交易）",
-            f"- 還原後仍超過 {SPLIT_LIKE:.0%} 的跳動：**{res['n_split_like']} 筆**（疑似股票分割、減資、面額變更，除權息資料沒涵蓋）",
+            f"- 還原後仍超過 {SPLIT_LIKE:.0%} 的跳動：**{res['n_split_like']} 筆**，其中前一個有效價格在 5 天內（排除長期停牌後復牌）的有 **{res['n_split_consecutive']} 筆**（疑似股票分割、減資、面額變更，除權息資料沒涵蓋）",
+            f"- **除權息還原驗證**：共 {res['n_ex_events']} 個除權息日；單日報酬中位數 原始 {res['ex_raw_median']:+.2%} → 還原後 {res['ex_adj_median']:+.2%}（還原正確的話應接近 0）；還原後仍超過 ±5% 的有 {res['n_ex_adj_bad']} 個",
         ]
     lines += ["", "## 各年度有資料的檔數", tbl(res["coverage"]), "",
               "## 零價格列最多的個股（前 20）", tbl(res["nonpositive_by_symbol"]), ""]
     if adj is not None:
-        lines += ["## 還原後仍有巨大跳動的個股（前 15）", tbl(res["split_like_by_symbol"]), "",
-                  "## 還原後最大跳動的紀錄（前 30）", tbl(res["split_like"]), "",
+        lines += ["## 還原後仍有巨大跳動、且非停牌復牌的個股（前 15）", tbl(res["split_like_by_symbol"]), "",
+                  "## 同上：最大跳動紀錄（前 40）", tbl(res["split_like"]), "",
+                  "## 除權息日還原後仍超過 ±5% 的紀錄（前 20）", tbl(res["ex_adj_bad"]), "",
                   "## 0050 還原後單日超過 8% 的日子", tbl(res["bench"]), ""]
     lines += ["## 缺漏最多的個股（前 30）", tbl(res["gaps"]), "",
               "## 原始價格單日漲跌最大的紀錄（前 30）", tbl(res["big_moves"]), "",
