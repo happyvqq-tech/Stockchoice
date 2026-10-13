@@ -35,8 +35,9 @@ jobs:
       - name: 下載（續傳）
         id: dl
         run: |
-          if [ "${{ github.event.inputs.stage || 'all' }}" = "quality" ]; then
-            python -m picker.data.pipeline --stage quality --hang-guard-minutes 25
+          STAGE="${{ github.event.inputs.stage || 'all' }}"
+          if [ "$STAGE" = "quality" ] || [ "$STAGE" = "sample" ]; then
+            python -m picker.data.pipeline --stage "$STAGE" --hang-guard-minutes 25
           else
             python -m picker.data.pipeline --stage all --budget-minutes 330
           fi
@@ -46,12 +47,14 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
       - name: 品質報告
         if: steps.dl.outputs.complete == 'true'
-        run: head -230 data_quality_report.md
+        run: '[ -f data_quality_report.md ] && head -230 data_quality_report.md || true'
       - uses: actions/upload-artifact@v4
         if: steps.dl.outputs.complete == 'true'
         with:
           name: data_quality_report
-          path: data_quality_report.md
+          path: |
+            data_quality_report.md
+            spot_check.md
       - name: 沒抓完 → 自動接下一輪
         if: steps.dl.outputs.complete != 'true'
         env:

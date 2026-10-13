@@ -168,9 +168,32 @@ def stage_quality(store, out="data_quality_report.md"):
     log("quality：已輸出", out)
 
 
+def stage_sample(store, seed=20261013, n_symbols=3, n_dates=3, out="spot_check.md"):
+    """產生給使用者對照看盤軟體的抽樣表：從近期成交金額最大的 100 檔隨機抽 3 檔，各抽 3 個不同年份的交易日。"""
+    import random
+    uni = store.read("universe/universe.parquet")
+    last = uni[uni["month_start"] == uni["month_start"].max()].sort_values("rank").head(100)
+    info = store.read("meta/universe_info.parquet").set_index("symbol")["name"]
+    rng = random.Random(seed)
+    syms = rng.sample(sorted(last["symbol"]), n_symbols)
+    rows = []
+    for sym in syms:
+        b = store.read(f"bars/{sym}.parquet")
+        b = b[(b["close"] > 0) & (b["volume"] > 0)]
+        years = sorted(b["date"].dt.year.unique())
+        for y in rng.sample(years, min(n_dates, len(years))):
+            r = b[b["date"].dt.year == y].sample(1, random_state=rng.randint(0, 10**6)).iloc[0]
+            rows.append((sym, info.get(sym, ""), r["date"].strftime("%Y-%m-%d"), r["open"], r["high"], r["low"], r["close"], int(r["volume"]), int(r["turnover"])))
+    df = pd.DataFrame(rows, columns=["代號", "名稱", "日期", "開盤", "最高", "最低", "收盤", "成交股數", "成交金額"]).sort_values(["代號", "日期"])
+    text = "# 抽樣驗收表（請對照看盤軟體，使用「未還原」的日線）\n\n> 研究用途，非投資建議。\n\n" + df.to_markdown(index=False) + "\n"
+    open(out, "w", encoding="utf-8").write(text)
+    for line in text.splitlines():
+        log(line)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", default="all", choices=["meta", "prices", "universe", "details", "quality", "all"])
+    ap.add_argument("--stage", default="all", choices=["meta", "prices", "universe", "details", "quality", "sample", "all"])
     ap.add_argument("--budget-minutes", type=float, default=330)
     ap.add_argument("--hang-guard-minutes", type=float, default=0,
                     help="大於 0 時：超過這個時間仍未結束就印出卡在哪一行並中止（除錯用）")
@@ -194,7 +217,9 @@ def main(argv=None):
                 ok = stage_details(ad, store, budget, cfg, today, syms)
         if ok and a.stage in ("quality", "all"):
             stage_quality(store)
-        complete = bool(ok) and a.stage in ("all", "quality")
+        if ok and a.stage == "sample":
+            stage_sample(store)
+        complete = bool(ok) and a.stage in ("all", "quality", "sample")
     log("完成" if complete else "尚未完成，等待下一輪續傳")
     gh = os.environ.get("GITHUB_OUTPUT")
     if gh:

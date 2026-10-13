@@ -69,3 +69,14 @@ def test_budget_exhausted_stops_without_losing_progress(tmp_path):
     pl.stage_meta(ad, store, pl.Budget(60))
     assert pl.stage_prices(ad, store, pl.Budget(0), cfg, "2018-09-28") is False  # 預算 0：什麼都不抓、回報未完成
     assert store.list("bars") == []
+
+
+def test_sample_stage_outputs_table(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg, store, ad = load_config(), LocalStore(tmp_path / "s"), FakeAdapter()
+    cfg["data_start"] = "2018-01-01"
+    b = pl.Budget(60)
+    pl.stage_meta(ad, store, b); pl.stage_prices(ad, store, b, cfg, "2018-09-28"); pl.stage_universe(store, cfg)
+    pl.stage_sample(store, n_symbols=2, n_dates=1)
+    txt = (tmp_path / "spot_check.md").read_text(encoding="utf-8")
+    assert "抽樣驗收表" in txt and "收盤" in txt and txt.count("2018-") == 2
