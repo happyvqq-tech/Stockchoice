@@ -161,3 +161,25 @@ def test_quality_flags_split_like_jump_without_dividend_data():
     div = pd.DataFrame({"symbol": ["0050"], "date": [pd.Timestamp("2018-01-01")], "before_price": [1.0], "after_price": [1.0]})
     r = check_bars(bars, d, div)
     assert r["n_split_consecutive"] == 1 and r["split_like"].iloc[0]["symbol"] == "0050"
+
+
+def test_adapter_parses_split_and_capital_reduction():
+    a = TWAdapter(None)
+    sp = a._split(pd.DataFrame([{"date": "2025-06-18", "stock_id": "0050", "type": "分割", "before_price": 188.65, "after_price": 47.16}]))
+    assert sp.iloc[0]["symbol"] == "0050" and sp.iloc[0]["after_price"] == 47.16
+    rd = a._reduction(pd.DataFrame([{"date": "2022-10-31", "stock_id": "3095", "ClosingPriceonTheLastTradingDay": 2.77,
+                                     "PostReductionReferencePrice": 30.27}]))
+    assert rd.iloc[0]["before_price"] == 2.77 and rd.iloc[0]["after_price"] == 30.27
+
+
+def test_combine_adjustments_prefers_split_over_dividend_on_same_day_and_fixes_0050():
+    from picker.data.adjust import combine_adjustments
+    split = pd.DataFrame({"symbol": ["0050"], "date": [pd.Timestamp("2025-06-18")], "before_price": [188.65], "after_price": [47.16]})
+    div = pd.DataFrame({"symbol": ["0050", "0050"], "date": [pd.Timestamp("2025-06-18"), pd.Timestamp("2025-01-20")],
+                        "before_price": [188.65, 170.0], "after_price": [188.0, 169.0]})
+    c = combine_adjustments(div, split, None)
+    assert len(c) == 2 and c[c["date"] == pd.Timestamp("2025-06-18")].iloc[0]["after_price"] == 47.16
+    d = pd.bdate_range("2025-06-16", periods=5)
+    bars = pd.DataFrame({"date": d, "close": [188.0, 188.65, 47.57, 47.6, 47.7]})
+    out = add_adj_close(bars, c[c["symbol"] == "0050"])
+    assert abs(out["adj_close"].pct_change().iloc[2]) < 0.01  # 分割日還原後報酬 ≈ 0.9%，不再是 -75%

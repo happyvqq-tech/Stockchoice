@@ -37,6 +37,10 @@ class FakeAdapter(MarketAdapter):
         self.calls.append((kind, symbol))
         return pd.DataFrame({"symbol": [symbol]})
 
+    def get_splits(self, start, end):
+        self.calls.append(("splits", "all"))
+        return pd.DataFrame({"date": [pd.Timestamp("2018-03-01")], "symbol": ["2330"], "before_price": [100.0], "after_price": [25.0]})
+
 
 def test_full_pipeline_and_resume(tmp_path):
     cfg, store, ad = load_config(), LocalStore(tmp_path), FakeAdapter()
@@ -51,7 +55,8 @@ def test_full_pipeline_and_resume(tmp_path):
     assert set(syms) == {"1101", "2330", "0050"}  # 空資料的 1409 不進股票池；基準必備
     assert pl.stage_universe(store, cfg) == syms  # 第二次直接沿用既有結果
     assert pl.stage_details(ad, store, b, cfg, "2018-09-28", syms)
-    assert len(store.list("events/institutional")) == 3
+    assert len(store.list("events/institutional")) == 3 and len(store.list("events/reduction")) == 3
+    assert pl.stage_splits(ad, store, b, cfg, "2018-09-28") and store.exists("events/split_all.parquet")
     out = tmp_path / "q.md"
     pl.stage_quality(store, str(out))
     txt = out.read_text(encoding="utf-8")

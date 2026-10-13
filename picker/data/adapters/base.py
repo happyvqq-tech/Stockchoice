@@ -26,3 +26,7 @@ class MarketAdapter(ABC):
     def get_events(self, kind: str, symbol: str, start: str, end: str) -> pd.DataFrame:
         """事件類資料，每列帶 available_date（最早可用於決策的日期）。
         kind: institutional / margin / revenue / dividend。"""
+
+    def get_splits(self, start: str, end: str) -> pd.DataFrame:
+        """全市場的股票分割／面額變更事件：date, symbol, before_price, after_price。預設無資料。"""
+        return pd.DataFrame(columns=["date", "symbol", "before_price", "after_price"])

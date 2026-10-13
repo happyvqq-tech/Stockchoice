@@ -14,3 +14,16 @@ def add_adj_close(bars, dividends):
                 factor[bars["date"] < pd.Timestamp(ex)] *= after / before
     bars["adj_close"] = bars["close"] * factor
     return bars
+
+
+def combine_adjustments(dividends=None, splits=None, reductions=None):
+    """合併三種還原事件。同一檔、同一天若同時有分割/減資與除權息，以分割/減資為準（避免重複還原）。"""
+    parts = []
+    need = {"symbol", "date", "before_price", "after_price"}
+    for prio, df in ((0, splits), (0, reductions), (1, dividends)):
+        if df is not None and len(df) and need <= set(df.columns):
+            parts.append(df[["symbol", "date", "before_price", "after_price"]].assign(_prio=prio))
+    if not parts:
+        return pd.DataFrame(columns=["symbol", "date", "before_price", "after_price"])
+    allv = pd.concat(parts, ignore_index=True).sort_values(["symbol", "date", "_prio"])
+    return allv.drop_duplicates(["symbol", "date"], keep="first").drop(columns="_prio").reset_index(drop=True)

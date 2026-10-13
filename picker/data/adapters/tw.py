@@ -127,7 +127,19 @@ class TWAdapter(MarketAdapter):
         if kind == "dividend":
             d = self.c.query("TaiwanStockDividendResult", data_id=symbol, start_date=start, end_date=end)
             return self._dividend(d)
+        if kind == "reduction":
+            d = self.c.query("TaiwanStockCapitalReductionReferencePrice", data_id=symbol, start_date=start, end_date=end)
+            return self._reduction(d)
         raise ValueError(kind)
+
+    def get_splits(self, start, end):
+        """全市場分割／面額變更（FinMind 免費版可不指定股票，依年度分段查）。"""
+        out = []
+        for y in range(pd.Timestamp(start).year, pd.Timestamp(end).year + 1):
+            a, b = max(pd.Timestamp(start), pd.Timestamp(f"{y}-01-01")), min(pd.Timestamp(end), pd.Timestamp(f"{y}-12-31"))
+            out.append(self._split(self.c.query("TaiwanStockSplitPrice", start_date=a.strftime("%Y-%m-%d"), end_date=b.strftime("%Y-%m-%d"))))
+        out = [o for o in out if len(o)]
+        return pd.concat(out, ignore_index=True) if out else self._split(pd.DataFrame())
 
     # ---- 轉換（純函式，可單元測試）----
     def _cal(self):
@@ -177,3 +189,19 @@ class TWAdapter(MarketAdapter):
         p = pd.DataFrame({"date": pd.to_datetime(d["date"]), "symbol": d["stock_id"],
                           "before_price": d["before_price"], "after_price": d["after_price"]})
         return p.sort_values("date").reset_index(drop=True)
+
+    def _split(self, d):
+        cols = ["date", "symbol", "before_price", "after_price"]
+        if d.empty:
+            return pd.DataFrame(columns=cols)
+        return pd.DataFrame({"date": pd.to_datetime(d["date"]), "symbol": d["stock_id"],
+                             "before_price": d["before_price"], "after_price": d["after_price"]}).sort_values("date").reset_index(drop=True)
+
+    def _reduction(self, d):
+        """減資：最後交易日收盤 → 恢復買賣參考價（彌補虧損的減資，股價會跳升，但股東價值不變，還原時視為中性）。"""
+        cols = ["date", "symbol", "before_price", "after_price"]
+        if d.empty:
+            return pd.DataFrame(columns=cols)
+        return pd.DataFrame({"date": pd.to_datetime(d["date"]), "symbol": d["stock_id"],
+                             "before_price": d["ClosingPriceonTheLastTradingDay"],
+                             "after_price": d["PostReductionReferencePrice"]}).sort_values("date").reset_index(drop=True)

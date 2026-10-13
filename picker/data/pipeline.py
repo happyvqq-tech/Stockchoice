@@ -13,12 +13,12 @@ import pandas as pd
 
 from picker.config import load_config
 from picker.data.adapters.tw import BENCHMARK, FinMindClient, RateLimited, TWAdapter
-from picker.data.adjust import add_adj_close
+from picker.data.adjust import add_adj_close, combine_adjustments
 from picker.data.quality import check_bars, render_report
 from picker.data.store import get_store
 from picker.data.universe import monthly_universe
 
-KINDS = ("institutional", "margin", "revenue", "dividend")
+KINDS = ("institutional", "margin", "revenue", "dividend", "reduction")
 
 
 class Budget:
@@ -110,11 +110,23 @@ def stage_universe(store, cfg):
     return sorted(set(uni["symbol"]) | {BENCHMARK})
 
 
+def stage_splits(ad, store, budget, cfg, today):
+    """全市場分割／面額變更（只要約 9 次請求）。"""
+    if store.exists("events/split_all.parquet"):
+        return True
+    df = call(ad.get_splits, budget, str(cfg["data_start"]), today)
+    if df is None:
+        return False
+    store.write("events/split_all.parquet", df)
+    log(f"splits：分割／面額變更 {len(df)} 筆")
+    return True
+
+
 def stage_details(ad, store, budget, cfg, today, symbols):
     start = str(cfg["data_start"])
     have = {k for k in store.list("events")}
     todo = [(k, s) for s in symbols for k in KINDS if f"events/{k}/{s}.parquet" not in have]
-    log(f"details：需要 {len(symbols)} 檔 × 4 類，待抓 {len(todo)} 次請求")
+    log(f"details：需要 {len(symbols)} 檔 × {len(KINDS)} 類，待抓 {len(todo)} 次請求")
     for i, (k, s) in enumerate(todo, 1):
         if not budget.ok():
             return False
@@ -127,11 +139,17 @@ def stage_details(ad, store, budget, cfg, today, symbols):
     return True
 
 
-def load_dividends(store, workers=8):
-    keys = store.list("events/dividend")
+def _load_events(store, kind, workers=8):
+    keys = store.list(f"events/{kind}")
     with ThreadPoolExecutor(workers) as ex:
         parts = [p for p in ex.map(store.read, keys) if len(p)]
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+
+
+def load_adjustments(store):
+    """還原用事件：除權息 ＋ 分割／面額變更 ＋ 減資。"""
+    splits = store.read("events/split_all.parquet") if store.exists("events/split_all.parquet") else None
+    return combine_adjustments(_load_events(store, "dividend"), splits, _load_events(store, "reduction"))
 
 
 def stage_quality(store, out="data_quality_report.md"):
@@ -139,8 +157,8 @@ def stage_quality(store, out="data_quality_report.md"):
     bars = load_all_bars(store)
     log(f"quality：讀完日線 {len(bars)} 列（{time.monotonic() - t0:.0f} 秒）")
     cal = store.read("meta/calendar.parquet")["date"]
-    divs = load_dividends(store)
-    log(f"quality：讀完除權息 {len(divs)} 列（累計 {time.monotonic() - t0:.0f} 秒）")
+    divs = load_adjustments(store)
+    log(f"quality：讀完還原事件 {len(divs)} 列（累計 {time.monotonic() - t0:.0f} 秒）")
     res = check_bars(bars, cal, divs)
     log(f"quality：檢查完成（累計 {time.monotonic() - t0:.0f} 秒）")
     extra = ""
@@ -168,6 +186,8 @@ def main(argv=None):
         ok = True
         if a.stage in ("prices", "all"):
             ok = stage_prices(ad, store, budget, cfg, today)
+        if ok and a.stage in ("details", "all"):
+            ok = stage_splits(ad, store, budget, cfg, today)
         if ok and a.stage in ("universe", "details", "all"):
             syms = stage_universe(store, cfg)
             if a.stage in ("details", "all"):

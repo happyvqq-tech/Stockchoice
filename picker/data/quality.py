@@ -56,6 +56,9 @@ def check_bars(bars, calendar, dividends=None):
         res["ex_raw_median"] = float(ev["ret"].median()) if len(ev) else None
         res["ex_adj_median"] = float(ev["adj_ret"].median()) if len(ev) else None
         res["n_ex_adj_bad"] = int((ev["adj_ret"].abs() > 0.05).sum())
+        worse = ev[ev["adj_ret"].abs() > ev["ret"].abs() + 0.05]  # 還原後反而比原始更離譜：還原事件本身可疑
+        res["n_ex_worse"] = len(worse)
+        res["ex_worse"] = _top(worse[["symbol", "date", "ret", "adj_ret"]].sort_values("adj_ret", key=abs, ascending=False), 20)
         res["ex_adj_bad"] = _top(ev[ev["adj_ret"].abs() > 0.05][["symbol", "date", "ret", "adj_ret"]]
                                  .sort_values("adj_ret", key=abs, ascending=False), 20)
         res["bench"] = b[(b["symbol"] == "0050") & (b["adj_ret"].abs() > 0.08)][["date", "close", "adj_ret"]].head(10)
@@ -91,13 +94,14 @@ def render_report(res, n_symbols, n_rows, extra=""):
         lines += [
             f"- 同樣條件，**改用還原價**：{adj} 筆（還原有效的話應大幅下降，剩下的多為新上市前幾天、處置/恢復交易）",
             f"- 還原後仍超過 {SPLIT_LIKE:.0%} 的跳動：**{res['n_split_like']} 筆**，其中前一個有效價格在 5 天內（排除長期停牌後復牌）的有 **{res['n_split_consecutive']} 筆**（疑似股票分割、減資、面額變更，除權息資料沒涵蓋）",
-            f"- **除權息還原驗證**：共 {res['n_ex_events']} 個除權息日；單日報酬中位數 原始 {res['ex_raw_median']:+.2%} → 還原後 {res['ex_adj_median']:+.2%}（還原正確的話應接近 0）；還原後仍超過 ±5% 的有 {res['n_ex_adj_bad']} 個",
+            f"- **除權息還原驗證**：共 {res['n_ex_events']} 個除權息日；單日報酬中位數 原始 {res['ex_raw_median']:+.2%} → 還原後 {res['ex_adj_median']:+.2%}（還原正確的話應接近 0）；還原後仍超過 ±5% 的有 {res['n_ex_adj_bad']} 個；**還原後比原始更離譜（可疑事件）的有 {res['n_ex_worse']} 個**",
         ]
     lines += ["", "## 各年度有資料的檔數", tbl(res["coverage"]), "",
               "## 零價格列最多的個股（前 20）", tbl(res["nonpositive_by_symbol"]), ""]
     if adj is not None:
         lines += ["## 還原後仍有巨大跳動、且非停牌復牌的個股（前 15）", tbl(res["split_like_by_symbol"]), "",
                   "## 同上：最大跳動紀錄（前 40）", tbl(res["split_like"]), "",
+                  "## 還原後反而更離譜的事件（前 20）", tbl(res["ex_worse"]), "",
                   "## 除權息日還原後仍超過 ±5% 的紀錄（前 20）", tbl(res["ex_adj_bad"]), "",
                   "## 0050 還原後單日超過 8% 的日子", tbl(res["bench"]), ""]
     lines += ["## 缺漏最多的個股（前 30）", tbl(res["gaps"]), "",
