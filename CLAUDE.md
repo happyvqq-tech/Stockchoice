@@ -41,11 +41,15 @@ One file, top to bottom: config constants → cached data helpers → diagnostic
 1. No future data: features use only data up to and including day t; event data (法人, 融資券, 月營收, 財報) keyed by its **availability date**; entry at **t+1 open**, exit at t+hold_days close.
 2. Never use the holdout period (`holdout_start`, default 2026-04-01) for tuning or decisions. Code must raise if training/evaluation touches it unless run with `--final-exam`, and such runs are logged in the experiment log.
 3. No LLM calls inside backtests. The LLM is used only in the live daily flow, and only to veto picks (never to add or upweight).
-4. `data_store/` must be gitignored and must not sit in a OneDrive-synced path; API keys stay in `.env` / Streamlit secrets.
+4. The repo is **public**: data and keys never go in git. Data of record lives in the private Supabase Storage bucket `picker-data` (`data_store/` is only a gitignored local cache); keys live in GitHub Secrets (`FINMIND_TOKEN`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`), Streamlit secrets or `.env`. `SUPABASE_URL` may end in `/rest/v1` — strip it.
 5. No automated order placement.
 6. Each experiment changes exactly one thing and is recorded in `experiments/EXPERIMENT_LOG.md` plus `experiments/runs/YYYYMMDD_name/`.
 7. Every output carries 「研究用途，非投資建議」.
 
 Required tests: truncation test (features computed on data cut at t equal features from full data), label test (t+1 open → t+hold_days close), cost test on known cases, holdout-guard test.
+
+## Spec v1.1 revisions (PICKER_SPEC.md §18 — takes precedence over earlier sections)
+
+Turnover/cost is the main threat (~0.79% per round trip in TW): backtests must include the buffer rule (hold while rank ≤ 30), compare 10- vs 20-day holds, cap 3 names per industry, cut to 5 names when the benchmark is below its 60-day MA, and exclude disposition/attention/full-delivery stocks. History comes from FinMind free tier (600 req/hour; whole-market and adjusted-price datasets are paid, so adj_close is computed from dividend data); daily increments in Phase 4 use TWSE/TPEx files. UI home page is an action list (buy/sell/hold/vetoed), never "probability of rising". US/CN adapters are postponed until TW is validated; paper-trade ≥3 months before any real money.
 
 Returns use adjusted prices (`adj_close`); limit-up/limit-down checks use raw prices.

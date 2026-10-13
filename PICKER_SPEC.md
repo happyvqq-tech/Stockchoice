@@ -45,7 +45,7 @@
 | 每期選股數 | 10 檔，等權重 | config `top_k` |
 | 模型 | 先「規則打分」當基準，再上 LightGBM | 不做大量調參 |
 | 新聞 / 市場資訊 | LLM 只做「排雷」（剔除重大利空），**不進回測** | 避免 LLM 訓練資料造成未來資訊洩漏 |
-| 資料儲存 | 本機 Parquet（歷史、訓練用）＋ Supabase（每日名單、紙上交易，供 Streamlit 顯示） | 本機資料夾**不可放在 OneDrive 同步路徑**，且需 gitignore |
+| 資料儲存 | **Supabase Storage 私人 bucket `picker-data`**（Parquet，歷史與訓練用）＋ Supabase 資料庫（每日名單、紙上交易，供 Streamlit 顯示）。共用既有 Supabase 專案，資料表放獨立 `picker` schema | v1.1 改為雲端；本機 `data_store/` 僅作快取，gitignore。repo 為公開，資料與金鑰一律不進 git |
 | 介面 | 沿用 Stockchoice 的 Streamlit，新增頁面 | 整合方式在 Phase 0 提案 |
 
 ---
@@ -102,7 +102,7 @@ picker/
 experiments/
   EXPERIMENT_LOG.md
   runs/                  # 每次實驗一個資料夾
-data_store/              # gitignore，本機 Parquet
+data_store/              # gitignore，本機快取（正本在 Supabase Storage）
 tests/
 ```
 
@@ -275,7 +275,7 @@ Purge：訓練期最後 hold_days 天的樣本移除（避免標籤跨入測試�
 1. 不使用未來資料：特徵只用 t 日以前；事件資料用可取得日；t+1 開盤進場。
 2. 不可用 holdout 期間調參或做決策。
 3. 回測中不呼叫 LLM。LLM 只在每日實盤流程中做排雷。
-4. `data_store/` 不放 OneDrive 同步路徑、不進 git；API 金鑰不進 git。
+4. 資料正本放 Supabase Storage（私人 bucket）；`data_store/` 本機快取不進 git、不放 OneDrive 同步路徑；API 金鑰只放 GitHub Secrets / Streamlit secrets / `.env`（repo 為公開，絕不進 git）。
 5. 不做自動下單。
 6. 每次實驗只改一個地方並記錄。
 7. 所有輸出註明「研究用途，非投資建議」。
@@ -321,13 +321,13 @@ Purge：訓練期最後 hold_days 天的樣本移除（避免標籤跨入測試�
 ## 15. 開發階段與驗收條件
 
 ### Phase 0：盤點與整合提案（只讀不寫）
-- [ ] 閱讀 Stockchoice 現有結構、CLAUDE.md、既有回測模組
-- [ ] 提出整合方案（同 repo 新資料夾 or 新 repo），說明理由
-- [ ] 評估既有程式哪些可重用
+- [x] 閱讀 Stockchoice 現有結構、CLAUDE.md、既有回測模組
+- [x] 提出整合方案（同 repo 新資料夾 or 新 repo），說明理由
+- [x] 評估既有程式哪些可重用
 - **驗收**：使用者同意整合方案
 
 ### Phase 1：資料層（台股）
-- [ ] `adapters/base.py` 統一介面 + `adapters/tw.py`
+- [x] `adapters/base.py` 統一介面 + `adapters/tw.py`（程式已寫、單元測試通過；真實資料下載進行中）
 - [ ] 日線、三大法人、融資融券、月營收（含公布日）、交易日曆
 - [ ] 動態股票池（universe.py）
 - [ ] Parquet 儲存與增量更新
@@ -413,7 +413,7 @@ llm:
   veto_severity: high
 
 paths:
-  data_store: "C:/stock_data/picker"   # 不可放在 OneDrive 同步資料夾
+  data_store: "data_store"             # 本機快取；正本在 Supabase Storage bucket picker-data
 ```
 
 ---
@@ -426,9 +426,43 @@ paths:
 | 持有天數 | 10 個交易日 | 之後可做實驗比較 5 / 20 日 |
 | 每期檔數 | 10 | |
 | 台股手續費折扣 | 1.0（無折扣） | 填入實際券商折扣 |
-| 本機資料路徑 | `C:/stock_data/picker` | 確認磁碟空間 |
+| 資料位置 | Supabase Storage（共用既有專案） | v1.1 起不再放本機 |
 | 新聞來源 | 待 Phase 4 提案 | |
 
 ---
+
+
+---
+
+## 18. v1.1 修訂（2026-10-13，使用者已同意全部採用）
+
+整體檢視後新增以下設計，與前文衝突時以本節為準。
+
+### 18.1 降低換手率與成本（Phase 2 回測必做）
+- 台股每輪（買＋賣）成本約 0.79%，每 10 日全換一年約 20%，故換手率是設計重點。
+- **緩衝區規則**：已持有者只要仍在前 `buffer_rank`（預設 30）名就續抱，跌出才賣；新買入仍取前 `top_k`。
+- **持有天數 10 日 vs 20 日**提前到 Phase 2 比較（各為一次實驗，一次只改一處）。
+- 手續費折扣暫用預設 1.0（使用者暫不提供）。
+
+### 18.2 風險控制
+- **大盤紅綠燈控制持股**：基準在 60 日線上＝全數持股；跌破＝只持 `top_k_bear`（預設 5）檔，其餘留現金。
+- **同產業上限** `max_per_industry`（預設 3 檔）。
+- **排除處置股、注意股、全額交割股**（證交所/櫃買每日公布名單，Phase 1 蒐集歷史名單來源，Phase 2 起套用；歷史取不到時須在報告註明）。
+
+### 18.3 資料來源分工
+- 歷史（2018 起）：FinMind 免費版（600 次/小時，單檔一次請求抓完整區間）。還原價用除權息資料自行計算（`TaiwanStockPriceAdj` 為付費）。月營收公布日依 5.3 保守規則（次月 11 日）。
+- 每日增量（Phase 4）：改用證交所/櫃買每日全市場檔，不佔 FinMind 額度。
+- 兩階段下載：先全市場日線（排名用）→ 只針對曾進過股票池的股票抓法人、融資券、月營收、除權息。
+- 下市股若免費版取不到，報告須註明「結果可能偏樂觀」。
+
+### 18.4 介面（取代 14.4 的呈現方式）
+- 首頁為**今日行動清單**（手機優先）：大盤燈號與建議持股、明天要買（附「開盤漲停不追」）、明天要賣（附原因）、續抱、被剔除者與原因。
+- 第二頁「這套系統可信嗎」：回測 vs 紙上交易並排、與 0050 累積報酬比較。
+- 分數不得標示為「上漲機率」。圖表用 plotly。Streamlit 頁面設為私人（僅限本人 email）。
+
+### 18.5 路線調整
+- Phase 5 的美股／A股延後到台股驗證成功之後。
+- 紙上交易至少 3 個月才考慮實盤。
+- config 新增：`buffer_rank: 30`、`top_k_bear: 5`、`max_per_industry: 3`。
 
 *研究用途，非投資建議。*

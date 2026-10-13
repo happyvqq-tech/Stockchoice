@@ -1,0 +1,54 @@
+name: download-history
+# 歷史資料下載（可中斷續傳）：每輪最多 5.5 小時，沒抓完就自動接下一輪（最多 12 輪）。
+on:
+  workflow_dispatch:
+    inputs:
+      generation:
+        description: "第幾輪（自動接力用，手動啟動請留 1）"
+        default: "1"
+  push:
+    paths:
+      - .github/workflows/download.yml
+concurrency:
+  group: download-history
+  cancel-in-progress: false
+permissions:
+  contents: read
+  actions: write
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-picker.txt
+      - run: pip install -r requirements-picker.txt
+      - name: 單元測試
+        run: python -m pytest -q
+      - name: 下載（續傳）
+        id: dl
+        run: python -m picker.data.pipeline --stage all --budget-minutes 330
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      - name: 品質報告
+        if: steps.dl.outputs.complete == 'true'
+        run: head -150 data_quality_report.md
+      - uses: actions/upload-artifact@v4
+        if: steps.dl.outputs.complete == 'true'
+        with:
+          name: data_quality_report
+          path: data_quality_report.md
+      - name: 沒抓完 → 自動接下一輪
+        if: steps.dl.outputs.complete != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gen=${{ github.event.inputs.generation || 1 }}
+          if [ "$gen" -ge 12 ]; then echo "已達 12 輪上限，停止"; exit 0; fi
+          gh workflow run download.yml --ref "${{ github.ref_name }}" -f generation=$((gen+1))

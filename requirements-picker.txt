@@ -1,0 +1,6 @@
+# 選股系統（本機 / GitHub Actions）用；雲端網頁只需要 requirements.txt
+pandas
+pyarrow
+pyyaml
+tabulate
+pytest
