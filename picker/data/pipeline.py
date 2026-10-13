@@ -126,10 +126,17 @@ def stage_details(ad, store, budget, cfg, today, symbols):
     return True
 
 
+def load_dividends(store, workers=8):
+    keys = store.list("events/dividend")
+    with ThreadPoolExecutor(workers) as ex:
+        parts = [p for p in ex.map(store.read, keys) if len(p)]
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+
+
 def stage_quality(store, out="data_quality_report.md"):
     bars = load_all_bars(store)
     cal = store.read("meta/calendar.parquet")["date"]
-    res = check_bars(bars, cal)
+    res = check_bars(bars, cal, load_dividends(store))
     extra = ""
     n_empty = len(store.list("bars")) - bars["symbol"].nunique()
     extra += f"## 查無日線資料的股票\n{n_empty} 檔（多半是下市股：免費版可能不提供，回測結果可能偏樂觀）\n"
@@ -157,7 +164,7 @@ def main(argv=None):
                 ok = stage_details(ad, store, budget, cfg, today, syms)
         if ok and a.stage in ("quality", "all"):
             stage_quality(store)
-        complete = bool(ok) and a.stage == "all"
+        complete = bool(ok) and a.stage in ("all", "quality")
     log("完成" if complete else "尚未完成，等待下一輪續傳")
     gh = os.environ.get("GITHUB_OUTPUT")
     if gh:

@@ -54,7 +54,8 @@ def test_full_pipeline_and_resume(tmp_path):
     assert len(store.list("events/institutional")) == 3
     out = tmp_path / "q.md"
     pl.stage_quality(store, str(out))
-    assert "資料品質報告" in out.read_text(encoding="utf-8") and "1 檔" in out.read_text(encoding="utf-8")
+    txt = out.read_text(encoding="utf-8")
+    assert "資料品質報告" in txt and "1 檔" in txt and "價格為 0 的列：0" in txt
 
 
 def test_budget_exhausted_stops_without_losing_progress(tmp_path):

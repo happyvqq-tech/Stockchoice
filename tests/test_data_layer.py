@@ -134,3 +134,17 @@ def test_supabase_store_list_recurses_into_folders():
     st = SupabaseStore("https://x.supabase.co/rest/v1", "k")
     st._req = lambda m, path, data=None, headers=None, timeout=0: (200, json.dumps(tree[json.loads(data)["prefix"]]).encode())
     assert st.list("events") == ["events/institutional/2317.parquet", "events/institutional/2330.parquet", "events/margin/2330.parquet"]
+
+
+def test_quality_excludes_zero_prices_and_adjusted_moves_shrink():
+    from picker.data.quality import check_bars
+    d = pd.bdate_range("2018-06-20", periods=8)
+    close = [100.0, 100.0, 0.0, 100.0, 70.0, 70.0, 70.0, 70.0]  # 第3天零價格(無資料)；第5天除權息日價格 100→70
+    bars = pd.DataFrame({"date": d, "symbol": "1111", "open": close, "high": close, "low": close, "close": close,
+                         "volume": 1, "turnover": 1.0})
+    div = pd.DataFrame({"symbol": ["1111"], "date": [d[4]], "before_price": [100.0], "after_price": [70.0]})
+    r = check_bars(bars, d, div)
+    assert r["n_nonpositive"] == 1  # 零價格列被數到、而且不會讓報酬變成 inf
+    assert r["n_raw_big"] == 1      # 只剩 100→70 這一次（零價格列已排除）
+    assert r["n_adj_big"] == 0      # 還原後除權息日的跳動消失
+    assert r["n_split_like"] == 0
