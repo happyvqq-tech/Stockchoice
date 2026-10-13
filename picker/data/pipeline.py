@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 import pandas as pd
@@ -85,13 +86,20 @@ def stage_prices(ad, store, budget, cfg, today):
     return True
 
 
-def load_all_bars(store):
-    parts = [store.read(k) for k in store.list("bars")]
+def load_all_bars(store, workers=8):
+    """讀回全部日線。雲端儲存一檔一檔讀很慢，所以用多執行緒並行讀。"""
+    keys = store.list("bars")
+    with ThreadPoolExecutor(workers) as ex:
+        parts = list(ex.map(store.read, keys))
     parts = [p for p in parts if len(p)]
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
 def stage_universe(store, cfg):
+    if store.exists("universe/universe.parquet"):  # 已算過就直接用，不必每一輪都重讀全部日線
+        uni = store.read("universe/universe.parquet")
+        log(f"universe：沿用既有結果（{uni['month_start'].nunique()} 個月、{uni['symbol'].nunique()} 檔）")
+        return sorted(set(uni["symbol"]) | {BENCHMARK})
     u = cfg["universe"]["TW"]
     bars = load_all_bars(store)
     cal = store.read("meta/calendar.parquet")["date"]
@@ -123,8 +131,8 @@ def stage_quality(store, out="data_quality_report.md"):
     cal = store.read("meta/calendar.parquet")["date"]
     res = check_bars(bars, cal)
     extra = ""
-    empty = [k for k in store.list("bars") if len(store.read(k)) == 0]
-    extra += f"## 查無日線資料的股票\n{len(empty)} 檔（多半是下市股：免費版可能不提供，回測結果可能偏樂觀）\n"
+    n_empty = len(store.list("bars")) - bars["symbol"].nunique()
+    extra += f"## 查無日線資料的股票\n{n_empty} 檔（多半是下市股：免費版可能不提供，回測結果可能偏樂觀）\n"
     open(out, "w", encoding="utf-8").write(render_report(res, bars["symbol"].nunique(), len(bars), extra))
     log("quality：已輸出", out)
 

@@ -49,6 +49,7 @@ def test_full_pipeline_and_resume(tmp_path):
     assert pl.stage_prices(ad, store, b, cfg, "2018-09-28") and len(ad.calls) == n  # 續傳：不重抓
     syms = pl.stage_universe(store, cfg)
     assert set(syms) == {"1101", "2330", "0050"}  # 空資料的 1409 不進股票池；基準必備
+    assert pl.stage_universe(store, cfg) == syms  # 第二次直接沿用既有結果
     assert pl.stage_details(ad, store, b, cfg, "2018-09-28", syms)
     assert len(store.list("events/institutional")) == 3
     out = tmp_path / "q.md"
