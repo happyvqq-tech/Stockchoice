@@ -183,3 +183,27 @@ def test_combine_adjustments_prefers_split_over_dividend_on_same_day_and_fixes_0
     bars = pd.DataFrame({"date": d, "close": [188.0, 188.65, 47.57, 47.6, 47.7]})
     out = add_adj_close(bars, c[c["symbol"] == "0050"])
     assert abs(out["adj_close"].pct_change().iloc[2]) < 0.01  # 分割日還原後報酬 ≈ 0.9%，不再是 -75%
+
+
+def test_supabase_store_retries_transient_network_errors():
+    """回歸測試：下載到一半斷線（IncompleteRead）不能讓整個管線失敗。"""
+    import http.client
+    from picker.data.store import SupabaseStore
+
+    class Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b"ok"
+
+    calls = {"n": 0}
+
+    def flaky(req, timeout=0):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise http.client.IncompleteRead(b"x", 5)
+        return Resp()
+
+    st = SupabaseStore("https://x.supabase.co", "k")
+    st._urlopen, st._sleep = staticmethod(flaky), staticmethod(lambda s: None)
+    assert st._req("GET", "/x") == (200, b"ok") and calls["n"] == 3

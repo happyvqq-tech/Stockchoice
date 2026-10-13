@@ -1,8 +1,10 @@
 """Parquet 儲存層：本機資料夾（LocalStore）或 Supabase Storage 私人 bucket（SupabaseStore）。
 鍵（key）長得像 "bars/2330.parquet"。所有資料不進 git。研究用途，非投資建議。"""
+import http.client
 import io
 import json
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -45,13 +47,28 @@ class SupabaseStore:
         self.bucket = bucket
         self.h = {"apikey": secret_key, "Authorization": f"Bearer {secret_key}"}
 
-    def _req(self, method, path, data=None, headers=None, timeout=120):
-        req = urllib.request.Request(self.base + path, data=data, method=method, headers={**self.h, **(headers or {})})
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return r.status, r.read()
-        except urllib.error.HTTPError as e:
-            return e.code, e.read()
+    _urlopen = staticmethod(urllib.request.urlopen)
+    _sleep = staticmethod(time.sleep)
+    RETRY_ERRORS = (http.client.IncompleteRead, http.client.RemoteDisconnected, urllib.error.URLError,
+                    ConnectionError, TimeoutError, OSError)
+
+    def _req(self, method, path, data=None, headers=None, timeout=120, retries=5):
+        """網路瞬斷（IncompleteRead、連線重置、逾時）與伺服器 5xx／429 會自動重試，最多 5 次（1、2、4、8 秒）。"""
+        for attempt in range(retries):
+            req = urllib.request.Request(self.base + path, data=data, method=method, headers={**self.h, **(headers or {})})
+            try:
+                with self._urlopen(req, timeout=timeout) as r:
+                    return r.status, r.read()
+            except urllib.error.HTTPError as e:
+                body = e.read()
+                if (e.code >= 500 or e.code == 429) and attempt < retries - 1:
+                    self._sleep(2 ** attempt)
+                    continue
+                return e.code, body
+            except self.RETRY_ERRORS:
+                if attempt == retries - 1:
+                    raise
+                self._sleep(2 ** attempt)
 
     def _obj(self, key):
         return f"/object/{self.bucket}/{urllib.parse.quote(key)}"
