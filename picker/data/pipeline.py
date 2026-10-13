@@ -2,6 +2,7 @@
 用法：python -m picker.data.pipeline --stage all --budget-minutes 330
 研究用途，非投資建議。"""
 import argparse
+import faulthandler
 import os
 import sys
 import time
@@ -134,9 +135,14 @@ def load_dividends(store, workers=8):
 
 
 def stage_quality(store, out="data_quality_report.md"):
+    t0 = time.monotonic()
     bars = load_all_bars(store)
+    log(f"quality：讀完日線 {len(bars)} 列（{time.monotonic() - t0:.0f} 秒）")
     cal = store.read("meta/calendar.parquet")["date"]
-    res = check_bars(bars, cal, load_dividends(store))
+    divs = load_dividends(store)
+    log(f"quality：讀完除權息 {len(divs)} 列（累計 {time.monotonic() - t0:.0f} 秒）")
+    res = check_bars(bars, cal, divs)
+    log(f"quality：檢查完成（累計 {time.monotonic() - t0:.0f} 秒）")
     extra = ""
     n_empty = len(store.list("bars")) - bars["symbol"].nunique()
     extra += f"## 查無日線資料的股票\n{n_empty} 檔（多半是下市股：免費版可能不提供，回測結果可能偏樂觀）\n"
@@ -148,7 +154,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage", default="all", choices=["meta", "prices", "universe", "details", "quality", "all"])
     ap.add_argument("--budget-minutes", type=float, default=330)
+    ap.add_argument("--hang-guard-minutes", type=float, default=0,
+                    help="大於 0 時：超過這個時間仍未結束就印出卡在哪一行並中止（除錯用）")
     a = ap.parse_args(argv)
+    if a.hang_guard_minutes > 0:
+        faulthandler.dump_traceback_later(a.hang_guard_minutes * 60, exit=True)
     cfg, budget, today = load_config(), Budget(a.budget_minutes), date.today().isoformat()
     store = get_store(cfg)
     ad = TWAdapter(FinMindClient(os.environ["FINMIND_TOKEN"]))

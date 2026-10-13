@@ -6,6 +6,9 @@ on:
       generation:
         description: "第幾輪（自動接力用，手動啟動請留 1）"
         default: "1"
+      stage:
+        description: "只跑某一階段（all / quality）；除錯用，一般留 all"
+        default: "all"
   push:
     paths:
       - .github/workflows/download.yml
@@ -31,7 +34,12 @@ jobs:
         run: python -m pytest -q
       - name: 下載（續傳）
         id: dl
-        run: python -m picker.data.pipeline --stage all --budget-minutes 330
+        run: |
+          if [ "${{ github.event.inputs.stage || 'all' }}" = "quality" ]; then
+            python -m picker.data.pipeline --stage quality --hang-guard-minutes 25
+          else
+            python -m picker.data.pipeline --stage all --budget-minutes 330
+          fi
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
