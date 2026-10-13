@@ -121,3 +121,16 @@ def test_universe_filter_keeps_only_common_stocks():
                 {"industry_category": "存託憑證", "stock_id": "9103", "stock_name": "美德醫療-DR", "type": "twse", "date": "2020-01-01"},
             ])
     assert list(TWAdapter(C()).get_universe()["symbol"]) == ["2330"]
+
+
+def test_supabase_store_list_recurses_into_folders():
+    """回歸測試：events/ 底下是子資料夾，列表必須往下找，否則續傳會以為什麼都沒抓過。"""
+    from picker.data.store import SupabaseStore
+    tree = {
+        "events": [{"name": "institutional", "id": None}, {"name": "margin", "id": None}],
+        "events/institutional": [{"name": "2330.parquet", "id": "a"}, {"name": "2317.parquet", "id": "b"}],
+        "events/margin": [{"name": "2330.parquet", "id": "c"}],
+    }
+    st = SupabaseStore("https://x.supabase.co/rest/v1", "k")
+    st._req = lambda m, path, data=None, headers=None, timeout=0: (200, json.dumps(tree[json.loads(data)["prefix"]]).encode())
+    assert st.list("events") == ["events/institutional/2317.parquet", "events/institutional/2330.parquet", "events/margin/2330.parquet"]

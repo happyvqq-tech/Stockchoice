@@ -75,14 +75,21 @@ class SupabaseStore:
             raise RuntimeError(f"upload {key} failed: HTTP {code} {body[:200]!r}")
 
     def list(self, prefix):
+        """遞迴列出 prefix 底下所有檔案（Storage 的列表一次只回一層，子資料夾要自己往下找）。"""
+        prefix = prefix.rstrip("/")
         out, offset = [], 0
         while True:
-            payload = json.dumps({"prefix": prefix.rstrip("/"), "limit": 1000, "offset": offset}).encode()
+            payload = json.dumps({"prefix": prefix, "limit": 1000, "offset": offset}).encode()
             code, body = self._req("POST", f"/object/list/{self.bucket}", payload, {"Content-Type": "application/json"})
             if code != 200:
                 raise RuntimeError(f"list {prefix} failed: HTTP {code} {body[:200]!r}")
             rows = json.loads(body)
-            out += [f"{prefix.rstrip('/')}/{r['name']}" for r in rows if r.get("id")]
+            for r in rows:
+                path = f"{prefix}/{r['name']}"
+                if r.get("id"):
+                    out.append(path)
+                else:
+                    out += self.list(path)  # 沒有 id ＝ 資料夾
             if len(rows) < 1000:
                 return sorted(out)
             offset += 1000
