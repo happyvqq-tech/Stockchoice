@@ -1,14 +1,14 @@
-"""Phase 1 探路：確認 FinMind 免費版、證交所/櫃買、Supabase 在 GitHub Actions 上是否可用。
-只印出狀態、筆數與欄位名稱，不印任何金鑰。研究用途，非投資建議。"""
+"""Phase 1 探路 #2：補驗疑點。只印狀態、筆數與欄位，不印任何金鑰。研究用途，非投資建議。"""
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 
 FM_TOKEN = os.environ.get("FINMIND_TOKEN", "")
-SB_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SB_KEY = os.environ.get("SUPABASE_SECRET_KEY", "")
+SB_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+SB_KEY = os.environ.get("SUPABASE_SECRET_KEY", "").strip()
 
 
 def get(url, headers=None, timeout=60):
@@ -24,59 +24,59 @@ def get(url, headers=None, timeout=60):
 
 def finmind(dataset, **params):
     q = urllib.parse.urlencode({"dataset": dataset, **params})
-    h = {"User-Agent": "Mozilla/5.0"}
-    if FM_TOKEN:
-        h["Authorization"] = f"Bearer {FM_TOKEN}"
+    h = {"User-Agent": "Mozilla/5.0", "Authorization": f"Bearer {FM_TOKEN}"}
     code, body = get("https://api.finmindtrade.com/api/v4/data?" + q, h)
     try:
         j = json.loads(body)
     except Exception:  # noqa: BLE001
-        print(f"  {dataset} {params}: HTTP {code} 非 JSON: {body[:150]!r}")
-        return
+        print(f"  {dataset} {params}: HTTP {code} 非 JSON")
+        return []
     rows = j.get("data") or []
-    cols = list(rows[0].keys()) if rows else []
-    print(f"  {dataset} {params}: HTTP {code} status={j.get('status')} msg={j.get('msg')!r} 筆數={len(rows)}")
-    if rows:
-        print(f"    欄位={cols}")
-        print(f"    首筆={rows[0]}")
+    dates = (rows[0].get("date"), rows[-1].get("date")) if rows else None
+    print(f"  {dataset} {params}: HTTP {code} msg={j.get('msg')!r} 筆數={len(rows)} 日期範圍={dates}")
+    return rows
 
 
-print("== FinMind 使用額度 ==")
-code, body = get("https://api.web.finmindtrade.com/v2/user_info",
-                 {"Authorization": f"Bearer {FM_TOKEN}", "User-Agent": "Mozilla/5.0"})
-print(f"  token 已設定={bool(FM_TOKEN)} HTTP {code} {body[:300]!r}")
+print("== FinMind：長區間、下市股、股票分類 ==")
+finmind("TaiwanStockPrice", data_id="2330", start_date="2018-01-01", end_date="2026-10-12")
+finmind("TaiwanStockInstitutionalInvestorsBuySell", data_id="2330", start_date="2018-01-01", end_date="2026-10-12")
+finmind("TaiwanStockMarginPurchaseShortSale", data_id="2330", start_date="2018-01-01", end_date="2026-10-12")
+finmind("TaiwanStockMonthRevenue", data_id="2330", start_date="2018-01-01", end_date="2026-10-12")
+finmind("TaiwanStockDividendResult", data_id="2330", start_date="2018-01-01", end_date="2026-10-12")
+info = finmind("TaiwanStockInfo")
+cats = {}
+for r in info:
+    cats[(r["type"], r["industry_category"])] = cats.get((r["type"], r["industry_category"]), 0) + 1
+print("  類別統計(type, industry)前40:", sorted(cats.items(), key=lambda x: -x[1])[:40])
+print("  不重複代號數=", len({r["stock_id"] for r in info}), " 4碼代號數=",
+      len({r["stock_id"] for r in info if re.fullmatch(r"\d{4}", r["stock_id"])}))
+delist = finmind("TaiwanStockDelisting")
+four = [r for r in delist if re.fullmatch(r"\d{4}", r["stock_id"])]
+print("  下市名單 4碼代號數=", len(four), " 範例=", four[:3])
+for r in four[:2]:
+    finmind("TaiwanStockPrice", data_id=r["stock_id"], start_date="2018-01-01", end_date="2026-10-12")
 
-print("== FinMind 各資料集（免費版能不能用）==")
-finmind("TaiwanStockInfo")
-finmind("TaiwanStockTradingDate")
-finmind("TaiwanStockPrice", data_id="2330", start_date="2018-01-01", end_date="2018-01-31")
-finmind("TaiwanStockPrice", start_date="2024-01-03", end_date="2024-01-03")  # 不指定股票：整個市場某一天
-finmind("TaiwanStockPriceAdj", data_id="2330", start_date="2018-01-01", end_date="2018-01-31")
-finmind("TaiwanStockInstitutionalInvestorsBuySell", data_id="2330", start_date="2018-01-01", end_date="2018-01-31")
-finmind("TaiwanStockMarginPurchaseShortSale", data_id="2330", start_date="2018-01-01", end_date="2018-01-31")
-finmind("TaiwanStockMonthRevenue", data_id="2330", start_date="2018-01-01", end_date="2018-12-31")
-finmind("TaiwanStockDividendResult", data_id="2330", start_date="2018-01-01", end_date="2019-12-31")
-finmind("TaiwanStockDelisting")
-finmind("TaiwanStockPrice", data_id="1409", start_date="2018-01-01", end_date="2018-01-31")  # 抽樣：較舊個股
-
-print("== 證交所 / 櫃買 ==")
-for name, url in {
-    "TWSE 全市場日行情": "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date=20240103&type=ALLBUT0999&response=json",
-    "TWSE 三大法人": "https://www.twse.com.tw/rwd/zh/fund/T86?date=20240103&selectType=ALLBUT0999&response=json",
-    "TWSE 融資融券": "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date=20240103&selectType=STOCK&response=json",
-    "TWSE 除權息": "https://www.twse.com.tw/rwd/zh/exRight/TWT49U?startDate=20240101&endDate=20240131&response=json",
-    "TPEx 上櫃日行情": "https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&d=113/01/03&o=json",
+print("== 櫃買日期格式 ==")
+for label, url in {
+    "d=113/01/03": "https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&d=113/01/03&o=json",
+    "date=2024/01/03": "https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=2024%2F01%2F03&type=EW&response=json",
+    "三大法人 date=2024/01/03": "https://www.tpex.org.tw/www/zh-tw/insti/dailyTrade?type=Daily&sect=EW&date=2024%2F01%2F03&response=json",
+    "融資融券 date=2024/01/03": "https://www.tpex.org.tw/www/zh-tw/margin/balance?date=2024%2F01%2F03&response=json",
 }.items():
     code, body = get(url)
-    print(f"  {name}: HTTP {code} 大小={len(body)} 開頭={body[:100]!r}")
+    m = re.search(rb'"date":"?(\d+)', body)
+    print(f"  {label}: HTTP {code} 大小={len(body)} 回傳date={m.group(1) if m else None}")
 
 print("== Supabase ==")
-if SB_URL and SB_KEY:
-    code, body = get(SB_URL + "/storage/v1/bucket", {"apikey": SB_KEY, "Authorization": f"Bearer {SB_KEY}"})
+if not (SB_URL and SB_KEY):
+    print("  SUPABASE_URL / SUPABASE_SECRET_KEY 未設定")
+else:
+    p = urllib.parse.urlparse(SB_URL)
+    print(f"  網址格式: scheme={p.scheme} 結尾路徑={p.path!r} 是否 supabase.co={p.netloc.endswith('.supabase.co')}")
+    base = f"{p.scheme}://{p.netloc}"
+    code, body = get(base + "/storage/v1/bucket", {"apikey": SB_KEY, "Authorization": f"Bearer {SB_KEY}"})
     try:
-        names = [(b.get("name"), b.get("public")) for b in json.loads(body)]
+        names = [(b.get("name"), "public" if b.get("public") else "private") for b in json.loads(body)]
     except Exception:  # noqa: BLE001
         names = body[:200]
     print(f"  Storage buckets: HTTP {code} {names}")
-else:
-    print("  SUPABASE_URL / SUPABASE_SECRET_KEY 未設定")
