@@ -9,6 +9,9 @@ on:
       draws:
         description: "隨機基準抽樣次數"
         default: "100"
+  push:
+    paths:
+      - .github/workflows/backtest.yml
 concurrency:
   group: backtest
   cancel-in-progress: false
@@ -28,7 +31,7 @@ jobs:
       - run: pip install -r requirements-picker.txt
       - run: python -m pytest -q
       - name: 回測
-        run: python -m picker.run_rulescore --name "${{ github.event.inputs.name }}" --random-draws "${{ github.event.inputs.draws }}"
+        run: python -m picker.run_rulescore --name "${{ github.event.inputs.name || 'rulescore_v1' }}" --random-draws "${{ github.event.inputs.draws || '30' }}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
