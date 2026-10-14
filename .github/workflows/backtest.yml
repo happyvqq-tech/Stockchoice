@@ -1,0 +1,39 @@
+name: backtest
+# Phase 2：RuleScore walk-forward 報告。只讀資料，不下載。結果印在 log，並存成 artifact。
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "實驗名稱（資料夾名）"
+        default: "rulescore_v1"
+      draws:
+        description: "隨機基準抽樣次數"
+        default: "100"
+concurrency:
+  group: backtest
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-picker.txt
+      - run: pip install -r requirements-picker.txt
+      - run: python -m pytest -q
+      - name: 回測
+        run: python -m picker.run_rulescore --name "${{ github.event.inputs.name }}" --random-draws "${{ github.event.inputs.draws }}"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: experiment
+          path: experiments/runs/
