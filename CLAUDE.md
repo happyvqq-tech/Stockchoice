@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Two things live (or will live) in this repo:
 
 1. **`app.py`** — the existing single-file Streamlit app "美股策略分析師" (US stocks, yfinance). Working, deployed, no tests.
-2. **The short-term stock picker** — specified in `PICKER_SPEC.md`, not yet implemented. Read `PICKER_SPEC.md` before any picker work; its §0 workflow rules are binding (see below).
+2. **The short-term stock picker** — specified in `PICKER_SPEC.md`. **Phase 1 (TW data layer) is done and accepted; Phase 2 (features, labels, RuleScore, backtest) has not started and needs the user's go-ahead.** Read `PICKER_SPEC.md` before any picker work; its §0 workflow rules are binding (see below).
 
 The user has no programming background and works on **Windows**. Explanations should be plain-language (Traditional Chinese), and commands given to the user must be copy-pasteable in a Windows terminal.
 
@@ -18,7 +18,13 @@ pip install -r requirements.txt
 streamlit run app.py          # local run; devcontainer auto-starts this on port 8501
 ```
 
-There is no lint config and no test suite yet. Per the spec, picker tests will live in `tests/` and run with `pytest` (single test: `pytest tests/test_x.py::test_name`).
+There is no lint config. Picker tests: `pip install -r requirements-picker.txt && python -m pytest -q` (single test: `pytest tests/test_data_layer.py::test_name`); `picker/` must be importable, so run from the repo root (or `PYTHONPATH=.`).
+
+The sandbox here cannot reach FinMind/TWSE/Supabase. Real data work runs on **GitHub Actions** (workflows on branch `claude/amazing-hopper-nozku9`; secrets `FINMIND_TOKEN`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY` are set there): `download.yml` runs `python -m picker.data.pipeline --stage all|quality|sample` (resumable, 5.5 h budget, self-chains), `probe.yml` runs `tools/probe_sources.py` on push (currently the official-data spot check). Trigger runs with the GitHub MCP `actions_run_trigger`; read results with `get_job_logs` (logs exist only after a job finishes). Pushing a workflow file also auto-starts a run — cancel it if it blocks the concurrency group. Don't trust elapsed-time guesses: use `date -u`.
+
+## Picker data layer (picker/, Phase 1)
+
+`adapters/base.py` (market-neutral interface) → `adapters/tw.py` (FinMind free tier, 600 req/h, self-throttled; converts events to an `available_date`: institutional/margin = next trading day, revenue = 11th of next month) → `store.py` (`LocalStore` or `SupabaseStore` REST on private bucket `picker-data`; retries transient errors; `list()` recurses folders) → `pipeline.py` (stages meta → prices → universe → splits → details → quality; every fetched file is stored, so reruns skip finished work). `adjust.py` builds `adj_close` from dividend + split/par-value + capital-reduction events (split/reduction win over a dividend on the same day). `universe.py` ranks monthly by prior-60-day turnover using only earlier data. Zero-price rows mean "no data", never a price. Known limits: PICKER_SPEC §18.6 (backtests are optimistic: survivorship bias).
 
 ## app.py architecture
 
