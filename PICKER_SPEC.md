@@ -345,10 +345,11 @@ Purge：訓練期最後 hold_days 天的樣本移除（避免標籤跨入測試�
 - **驗收結果（2026-10-14）**：報告見 `experiments/runs/20261014_rulescore_v1/report.md`。RuleScore v1 年化 27.0%、落後 0050 4.7%，IC≈0，選股能力不明顯（偏樂觀的數字仍打不贏大盤）。處置／注意／全額交割股排除尚未接上資料來源。
 
 ### Phase 3：LightGBM
-- [ ] lgbm.py 接入 walk-forward
-- [ ] 特徵重要性（每輪）與選股理由（pred_contrib）
-- [ ] 與 RuleScore 比較，依 11.2 規則判定是否採用
+- [x] lgbm.py 接入 walk-forward
+- [x] 特徵重要性（每輪）與選股理由（pred_contrib）
+- [x] 與 RuleScore 比較，依 11.2 規則判定是否採用
 - **驗收**：比較報告 + 實驗日誌記錄
+- **驗收結果（2026-10-15）**：比較報告見 `experiments/runs/20261015_lgbm_v1/report.md`，已記入實驗日誌。LightGBM 未通過 11.2 採用規則（期望值 1.42% vs 1.53%、48% 輪次較好），維持 RuleScore；兩者都沒有穩定的選股能力。
 
 ### Phase 4：每日流程與紙上交易
 - [ ] daily_run.py、news_filter.py、paper_trade.py

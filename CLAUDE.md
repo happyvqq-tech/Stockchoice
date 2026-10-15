@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Two things live (or will live) in this repo:
 
 1. **`app.py`** — the existing single-file Streamlit app "美股策略分析師" (US stocks, yfinance). Working, deployed, no tests.
-2. **The short-term stock picker** — specified in `PICKER_SPEC.md`. **Phase 1 (TW data layer) and Phase 2 (features, labels, RuleScore, backtest) are done; Phase 3 (LightGBM) has not started and needs the user's go-ahead.** Read `PICKER_SPEC.md` before any picker work; its §0 workflow rules are binding (see below).
+2. **The short-term stock picker** — specified in `PICKER_SPEC.md`. **Phases 1 (data), 2 (features/RuleScore/backtest) and 3 (LightGBM) are done; Phase 4 (daily flow, paper trading) has not started and needs the user's go-ahead. Neither RuleScore nor LightGBM showed a reliable edge over 0050 (see experiments/EXPERIMENT_LOG.md) — discuss direction with the user before building Phase 4.** Read `PICKER_SPEC.md` before any picker work; its §0 workflow rules are binding (see below).
 
 The user has no programming background and works on **Windows**. Explanations should be plain-language (Traditional Chinese), and commands given to the user must be copy-pasteable in a Windows terminal.
 
@@ -28,7 +28,7 @@ The sandbox here cannot reach FinMind/TWSE/Supabase. Real data work runs on **Gi
 
 ## Picker research layer (Phase 2)
 
-`features/build.py` (v1 features from adj prices, event data aligned by `available_date`, per-day rank normalisation, monthly-universe filter) → `labels.py` (t+1 open → t+h close, limit-up entry unbuyable, limit-down/suspended exit deferred ≤5 days) → `models/rule_score.py` → `backtest/portfolio.py` (non-overlapping rebalance every h days, buffer rule, bear-market 5 names, industry cap, costs from `costs.py`) → `backtest/walkforward.py` (windows + holdout guard in `guard.py`). `python -m picker.run_rulescore` (workflow `backtest.yml`) reads Supabase data, cuts everything at `holdout_start`, writes `experiments/runs/<date>_<name>/`. Result log: `experiments/EXPERIMENT_LOG.md`. Not yet applied: disposition/attention/full-delivery exclusion.
+`features/build.py` (v1 features from adj prices, event data aligned by `available_date`, per-day rank normalisation, monthly-universe filter) → `labels.py` (t+1 open → t+h close, limit-up entry unbuyable, limit-down/suspended exit deferred ≤5 days) → `models/rule_score.py` → `backtest/portfolio.py` (non-overlapping rebalance every h days, buffer rule, bear-market 5 names, industry cap, costs from `costs.py`) → `backtest/walkforward.py` (windows + holdout guard in `guard.py`). `python -m picker.run_rulescore` (workflow `backtest.yml`) reads Supabase data, cuts everything at `holdout_start`, writes `experiments/runs/<date>_<name>/`. Result log: `experiments/EXPERIMENT_LOG.md`. `models/lgbm.py` + `python -m picker.run_lgbm` (native lightgbm API, purge, val = last 3 months of train window) compare against RuleScore under spec §11.2. Not yet applied: disposition/attention/full-delivery exclusion.
 
 ## app.py architecture
 

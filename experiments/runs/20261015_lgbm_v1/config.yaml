@@ -1,0 +1,55 @@
+primary_market: TW          # TW / US / CN
+data_start: 2018-01-01
+holdout_start: 2026-04-01   # 期末考，開發期間禁止使用
+
+universe:
+  TW:
+    top_n_by_turnover: 300
+    lookback_days: 60
+    rebalance: monthly
+    include_otc: true       # 含上櫃
+
+hold_days: 10
+top_k: 10
+top_k_bear: 5               # 大盤在 60 日線下時只持有的檔數
+buffer_rank: 30             # 已持有者仍在前 30 名就續抱
+max_per_industry: 3
+label_top_pct: 0.2
+
+walkforward:
+  train_months: 24
+  test_months: 3
+  step_months: 3
+  purge_days: 10            # = hold_days
+
+benchmark:
+  TW: "0050"
+  US: "SPY"
+  CN: "510300"
+
+costs:
+  TW: {commission: 0.001425, commission_discount: 1.0, sell_tax: 0.003, slippage: 0.001}
+  US: {commission: 0.0, sell_tax: 0.0, slippage: 0.0005}
+  CN: {commission: 0.00025, sell_tax: 0.0005, slippage: 0.001}
+
+lgbm:
+  num_leaves: 31
+  learning_rate: 0.05
+  n_estimators: 500
+  early_stopping_rounds: 50
+  feature_fraction: 0.8
+  bagging_fraction: 0.8
+  bagging_freq: 1
+  min_child_samples: 100
+  seed: 42
+
+llm:
+  model: claude-sonnet-5-5
+  news_lookback_days: 3
+  veto_severity: high
+
+paths:
+  data_store: "data_store"  # 本機快取；正本在 Supabase Storage bucket picker-data
+
+storage:
+  bucket: picker-data
