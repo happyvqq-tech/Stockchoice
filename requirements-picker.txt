@@ -4,3 +4,4 @@ pyarrow
 pyyaml
 tabulate
 pytest
+lightgbm

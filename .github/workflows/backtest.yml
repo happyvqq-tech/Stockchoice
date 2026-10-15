@@ -3,9 +3,9 @@ name: backtest
 on:
   workflow_dispatch:
     inputs:
-      name:
-        description: "實驗名稱（資料夾名）"
-        default: "rulescore_v1"
+      module:
+        description: "要跑的程式（picker.run_rulescore / picker.run_lgbm）"
+        default: "picker.run_lgbm"
       draws:
         description: "隨機基準抽樣次數"
         default: "100"
@@ -31,7 +31,7 @@ jobs:
       - run: pip install -r requirements-picker.txt
       - run: python -m pytest -q
       - name: 回測
-        run: python -m picker.run_rulescore --name "${{ github.event.inputs.name || 'rulescore_v1' }}" --random-draws "${{ github.event.inputs.draws || '30' }}"
+        run: python -m ${{ github.event.inputs.module || 'picker.run_lgbm' }} --random-draws "${{ github.event.inputs.draws || '30' }}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
